@@ -75,7 +75,7 @@ class Image {
      * @yields {[number, number]} The coordinates of the pixel
      * @returns {void}
      */
-    * [Symbol.iterator]() {
+    *[Symbol.iterator]() {
         for (let y = 1; y <= this.height; y++) {
             for (let x = 1; x <= this.width; x++) {
                 yield [x, y];
@@ -1004,7 +1004,7 @@ class Image {
             const maxVal = values[i];
             const gradient = this.__gradient__(minVal, maxVal);
 
-            gradients.push({min: minPos, max: maxPos, gradient});
+            gradients.push({ min: minPos, max: maxPos, gradient });
         }
 
         return position => {
@@ -1088,7 +1088,7 @@ class Image {
      * @return {Promise<Uint8Array>} The encoded data
      */
     async encode(compression = 1) {
-        return await png.encode(this.bitmap, {width: this.width, height: this.height, level: compression, channels: 4});
+        return await png.encode(this.bitmap, { width: this.width, height: this.height, level: compression, channels: 4 });
     }
 
     /**
@@ -1119,7 +1119,7 @@ class Image {
         }
 
         if (view.getUint32(0, false) === 0x89504e47) { // PNG
-            const {width, height, pixels} = await png.decode(data);
+            const { width, height, pixels } = await png.decode(data);
             image = new this(width, height);
             image.bitmap.set(pixels);
         } else if ((view.getUint32(0, false) >>> 8) === 0xffd8ff) { // JPEG
@@ -1240,6 +1240,34 @@ class Image {
      * @param {boolean} wrapStyle Whether to break at words ({@link WRAP_STYLE_WORD}) or at characters ({@link WRAP_STYLE_CHAR})
      * @return {Promise<Image>} The rendered text
      */
+    static async cacheFont(scale, font) {
+        await fontlib.init();
+        return {
+            font: new fontlib.Font(scale, font),
+            scale: scale,
+        };
+
+    }
+    static async renderTextFromCache(cachedFont, text, color = 0xffffffff, wrapWidth = Infinity, wrapStyle = this.WRAP_STYLE_WORD) {
+        let font = cachedFont.font;
+        const [r, g, b, a] = Image.colorToRGBA(color);
+
+        const layout = new fontlib.Layout();
+
+        layout.reset({
+            wrap_style: wrapStyle ? 'word' : 'letter',
+            max_width: Infinity === wrapWidth ? null : wrapWidth,
+        });
+
+        layout.append(font, text, cachedFont.scale);
+        const framebuffer = layout.rasterize(r, g, b);
+        const image = new this(framebuffer.width, framebuffer.height);
+
+        image.bitmap.set(framebuffer.buffer);
+
+        layout.free();
+        return image.opacity(a / 0xff);
+    }
     static async renderText(font, scale, text, color = 0xffffffff, wrapWidth = Infinity, wrapStyle = this.WRAP_STYLE_WORD) {
         await fontlib.init();
         font = new fontlib.Font(scale, font);
@@ -1366,4 +1394,4 @@ class GIF extends Array {
     }
 }
 
-module.exports = {Image, GIF, Frame};
+module.exports = { Image, GIF, Frame };
