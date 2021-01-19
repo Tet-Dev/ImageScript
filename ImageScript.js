@@ -1231,14 +1231,11 @@ class Image {
     }
 
     /**
-     * Creates a new image containing the rendered text.
+     * Creates a new font object containing the cached font.
      * @param {Uint8Array} font TrueType (ttf/ttc) or OpenType (otf) font buffer to use
      * @param {number} scale Font size to use
      * @param {string} text Text to render
-     * @param {number} color Text color to use
-     * @param {number} wrapWidth Image width before wrapping
-     * @param {boolean} wrapStyle Whether to break at words ({@link WRAP_STYLE_WORD}) or at characters ({@link WRAP_STYLE_CHAR})
-     * @return {Promise<Image>} The rendered text
+     * @return {Promise<Font>} The rendered text
      */
     static async cacheFont(scale, font) {
         await fontlib.init();
@@ -1248,6 +1245,15 @@ class Image {
         };
 
     }
+    /**
+     * Creates a new image containing the rendered text.
+     * @param {Font} font Cached Font
+     * @param {string} text Text to render
+     * @param {number} color Text color to use
+     * @param {number} wrapWidth Image width before wrapping
+     * @param {boolean} wrapStyle Whether to break at words ({@link WRAP_STYLE_WORD}) or at characters ({@link WRAP_STYLE_CHAR})
+     * @return {Promise<Image>} The rendered text
+     */
     static async renderTextFromCache(cachedFont, text, color = 0xffffffff, wrapWidth = Infinity, wrapStyle = this.WRAP_STYLE_WORD) {
         let font = cachedFont.font;
         const [r, g, b, a] = Image.colorToRGBA(color);
