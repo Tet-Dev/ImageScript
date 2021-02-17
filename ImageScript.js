@@ -1245,6 +1245,18 @@ class Image {
         };
 
     }
+    static async cacheFontAtScales(scales, font) {
+        await fontlib.init();
+        const fonts = {};
+        for (const scale in scales){
+            font.scale = {
+                font: new fontlib.Font(scale, font),
+                scale: scale,
+            }
+        }
+        return fonts;
+
+    }
     /**
      * Creates a new image containing the rendered text.
      * @param {Font} font Cached Font
