@@ -1248,7 +1248,8 @@ class Image {
     static async cacheFontAtScales(scales, font) {
         await fontlib.init();
         const fonts = {};
-        for (const scale in scales){
+        for (let scale in scales){
+            scale = scales[scale];
             const startTime = Date.now();
             fonts[scale] = {
                 font: new fontlib.Font(scale, font),
