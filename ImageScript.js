@@ -1249,10 +1249,12 @@ class Image {
         await fontlib.init();
         const fonts = {};
         for (const scale in scales){
-            font.scale = {
+            const startTime = Date.now();
+            fonts[scale] = {
                 font: new fontlib.Font(scale, font),
                 scale: scale,
             }
+            console.log(`Rendered font in ${Date.now() - startTime}ms!`);
         }
         return fonts;
 
