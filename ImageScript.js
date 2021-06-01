@@ -1362,10 +1362,9 @@ class Image {
      * @param {number} color Text color to use
      * @param {number} wrapWidth Image width before wrapping
      * @param {boolean} wrapStyle Whether to break at words ({@link WRAP_STYLE_WORD}) or at characters ({@link WRAP_STYLE_CHAR})
-	 * @param {Layout} layout
      * @return {Promise<Image>} The rendered text
      */
-    static async renderTextFromCache(cachedFont, text, color = 0xffffffff, wrapWidth = Infinity, wrapStyle = this.WRAP_STYLE_WORD,layout) {
+    static async renderTextFromCache(cachedFont, text, color = 0xffffffff, wrapWidth = Infinity, wrapStyle = this.WRAP_STYLE_WORD) {
         let font = cachedFont.font;
         const [r, g, b, a] = Image.colorToRGBA(color);
 		
