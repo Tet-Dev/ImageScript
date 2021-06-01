@@ -1351,7 +1351,8 @@ class Image {
 			
             console.log(`Rendered font in ${Date.now() - startTime}ms!`);
         }
-		fonts["layout"] = Layout;
+		fontlib.Layout = Layout;
+		fontlib.Font = Font;
         return fonts;
 
     }
