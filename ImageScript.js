@@ -1331,25 +1331,27 @@ class Image {
      * @return {Promise<Font>} The rendered text
      */
     static async cacheFont(scale, font) {
-        await fontlib.init();
+		const { Font, Layout } = await fontlib.init();
         return {
-            font: new fontlib.Font(scale, font),
+            font: new Font(scale, font),
             scale: scale,
         };
 
     }
     static async cacheFontAtScales(scales, font) {
-        await fontlib.init();
+        const { Font, Layout } = await fontlib.init();
         const fonts = {};
         for (let scale in scales){
             scale = scales[scale];
             const startTime = Date.now();
             fonts[scale] = {
-                font: new fontlib.Font(scale, font),
+                font: new Font(scale, font),
                 scale: scale,
             }
+			
             console.log(`Rendered font in ${Date.now() - startTime}ms!`);
         }
+		fonts["layout"] = Layout;
         return fonts;
 
     }
@@ -1360,12 +1362,13 @@ class Image {
      * @param {number} color Text color to use
      * @param {number} wrapWidth Image width before wrapping
      * @param {boolean} wrapStyle Whether to break at words ({@link WRAP_STYLE_WORD}) or at characters ({@link WRAP_STYLE_CHAR})
+	 * @param {Layout} layout
      * @return {Promise<Image>} The rendered text
      */
-    static async renderTextFromCache(cachedFont, text, color = 0xffffffff, wrapWidth = Infinity, wrapStyle = this.WRAP_STYLE_WORD) {
+    static async renderTextFromCache(cachedFont, text, color = 0xffffffff, wrapWidth = Infinity, wrapStyle = this.WRAP_STYLE_WORD,layout) {
         let font = cachedFont.font;
         const [r, g, b, a] = Image.colorToRGBA(color);
-
+		
         const layout = new fontlib.Layout();
 
         layout.reset({
