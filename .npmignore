@@ -1,5 +1,5 @@
 .idea/
-tests/
 .github/
-coverage/
+tests/
 .nyc_output/
+coverage/

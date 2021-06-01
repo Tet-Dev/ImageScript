@@ -1,6 +1,4 @@
-old/
 .idea/
-coverage/
-.DS_Store
 .nyc_output/
+coverage/
 .node_modules/

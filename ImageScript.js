@@ -1,21 +1,9 @@
-const png = require('./png/node.js');
-const mem = require('./utils/mem.js');
-const codecs = require('./node/index.js');
-const {version} = require('./package.json');
-
-// old
-const svglib = require('./wasm/node/svg.js');
-const giflib = require('./wasm/node/gif.js');
-const fontlib = require('./wasm/node/font.js');
-const jpeglib = require('./wasm/node/jpeg.js');
-const tifflib = require('./wasm/node/tiff.js');
-
-const MAGIC_NUMBERS = {
-    PNG: 0x89504e47,
-    JPEG: 0xffd8ff,
-    TIFF: 0x49492a00,
-    GIF: 0x474946
-};
+const png = require('./utils/png');
+const fontlib = require('./utils/wasm/font');
+const svglib = require('./utils/wasm/svg');
+const jpeglib = require('./utils/wasm/jpeg');
+const tifflib = require('./utils/wasm/tiff');
+const giflib = require('./utils/wasm/gif');
 
 /**
  * Represents an image; provides utility functions
@@ -61,6 +49,11 @@ class Image {
         return `Image<${this.width}x${this.height}>`;
     }
 
+    /** @private */
+    static new(width, height) {
+        return new this(width, height);
+    }
+
     /**
      * The images width
      * @returns {number}
@@ -78,8 +71,8 @@ class Image {
     }
 
     /**
-     * Yields an [x, y] array for every pixel in the image
-     * @yields {number[]} The coordinates of the pixel ([x, y])
+     * Yields an [x,y] array for every pixel in the image
+     * @yields {[number, number]} The coordinates of the pixel
      * @returns {void}
      */
     *[Symbol.iterator]() {
@@ -91,8 +84,9 @@ class Image {
     }
 
     /**
-     * Yields an [x, y, color] array for every pixel in the image
-     * @yields {number[]} The coordinates and color of the pixel ([x, y, color])
+     * Yields an [x,y,color] array for every pixel in the image
+     * @yields {[number, number, number]} The coordinates and color of the pixel
+     * @returns {void}
      */
     * iterateWithColors() {
         let offset = 0;
@@ -183,7 +177,7 @@ class Image {
      * @param g {number} (0..255)
      * @param b {number} (0..255)
      * @param a {number} (0..255)
-     * @returns {number[]} The HSLA values ([H, S, L, A])
+     * @returns {(number)[]} The HSLA values ([H, S, L, A])
      */
     static rgbaToHSLA(r, g, b, a) {
         r /= 255;
@@ -242,7 +236,7 @@ class Image {
      */
     getPixelAt(x, y) {
         this.__check_boundaries__(x, y);
-        return this.__view__.getUint32(((~~y - 1) * this.width + (~~x - 1)) * 4, false);
+        return this.__view__.getUint32((~~y - 1) * this.width + (~~x - 1), false);
     }
 
     /**
@@ -341,7 +335,7 @@ class Image {
      * @returns {Image}
      */
     clone() {
-        const image = new Image(this.width, this.height);
+        const image = Image.new(this.width, this.height);
         image.bitmap.set(this.bitmap);
         return image;
     }
@@ -373,7 +367,6 @@ class Image {
         return this.__apply__(image);
     }
 
-    /** @private */
     __scale__(factor, mode = Image.RESIZE_NEAREST_NEIGHBOR) {
         if (factor === 1) return this;
         return this.__resize__(this.width * factor, this.height * factor, mode);
@@ -392,7 +385,6 @@ class Image {
         return this.__apply__(image);
     }
 
-    /** @private */
     __resize__(width, height, mode = Image.RESIZE_NEAREST_NEIGHBOR) {
         if (width === Image.RESIZE_AUTO && height === Image.RESIZE_AUTO) throw new Error('RESIZE_AUTO can only be used for either width or height, not for both');
         else if (width === Image.RESIZE_AUTO) width = this.width / this.height * height;
@@ -448,7 +440,7 @@ class Image {
         if (width > this.width) width = this.width;
         if (height > this.height) height = this.height;
 
-        return this.__apply__(this.__crop__(~~x, ~~y, ~~width, ~~height));
+        return this.__apply__(this.__crop__(x, y, width, height));
     }
 
     /**
@@ -483,10 +475,8 @@ class Image {
      * @returns {Image}
      */
     drawBox(x, y, width, height, color) {
-        x = ~~(x - 1);
-        y = ~~(y - 1);
-        width = ~~width;
-        height = ~~height;
+        x -= 1;
+        y -= 1;
 
         if (typeof color === 'function') {
             for (let tY = 1; tY <= height; tY++) {
@@ -516,12 +506,12 @@ class Image {
     __fast_box__(x, y, width, height, color) {
         if (x < 0) {
             width += x;
-            x = 0;
+            x = 1;
         }
 
         if (y < 0) {
             height += y;
-            y = 0;
+            y = 1;
         }
 
         const right = Math.max(Math.min(x + width, this.width), 1);
@@ -872,7 +862,7 @@ class Image {
             ? Math.abs(this.width * cos) + Math.abs(this.height * sin)
             : this.height;
 
-        const out = new Image(width, height);
+        const out = Image.new(width, height);
 
         const out_cx = width / 2 - .5;
         const out_cy = height / 2 - .5;
@@ -963,8 +953,8 @@ class Image {
 
     /**
      * @private
-     * @param {Image|Frame} image
-     * @returns {Image|Frame}
+     * @param {Image} image
+     * @returns {Image}
      */
     __apply__(image) {
         this.__width__ = image.__width__;
@@ -972,9 +962,6 @@ class Image {
         this.__view__ = image.__view__;
         this.__u32__ = image.__u32__;
         this.bitmap = image.bitmap;
-
-        if (image instanceof Frame)
-            return Frame.from(this, image.duration, image.xOffset, image.yOffset, image.disposalMode);
 
         return this;
     }
@@ -1095,112 +1082,23 @@ class Image {
         };
     }
 
-    fisheye(radius = 2) {
-        const r = new Image(this.width, this.height);
-
-        const w = this.width;
-        const h = this.height;
-        const tu32 = this.__u32__;
-        const ru32 = r.__u32__;
-        const iw = 1 / w;
-        const ih = 1 / h;
-
-        for (const [x, y] of this) {
-            const xco = x * iw - .5;
-            const yco = y * ih - .5;
-            const dfc = Math.sqrt(xco ** 2 + yco ** 2);
-            const dis = 2 * dfc ** radius;
-            const nx = ((dis * xco / dfc + 0.5) * w) | 0;
-            const ny = ((dis * yco / dfc + 0.5) * h) | 0;
-
-            if (nx < 1 || nx > w || ny < 1 || ny > h || isNaN(nx) || isNaN(ny))
-                continue;
-
-            ru32[y * w + x] = tu32[w * ny + nx];
-        }
-
-        const cO = tu32.length * .5 + w / 2;
-        ru32[cO] = tu32[cO];
-
-        return this.__apply__(r);
-    }
-
-    /**
-     * @typedef {object} PNGMetadata
-     * @property {string} [title] The images title
-     * @property {string} [author] The images author
-     * @property {string} [description] The images description
-     * @property {string} [copyright] The images copyright info
-     * @property {string|number|Date} [creationTime=Date.now()] The images creation timestamp
-     * @property {string} [software="github.com/matmen/ImageScript vX.X.X"] The software used to create this image
-     * @property {string} [disclaimer] A disclaimer for the image
-     * @property {string} [warning] A warning for the image
-     * @property {string} [source] The images source
-     * @property {string} [comment] A comment for the image
-     */
-
     /**
      * Encodes the image into a PNG
-     * @param {number} compression The compression level to use (0-9)
-     * @param {PNGMetadata} [meta={}] Image metadata
+     * @param {number} compression The compression level to use (0-3)
      * @return {Promise<Uint8Array>} The encoded data
      */
-    async encode(compression = 1, {
-        title,
-        author,
-        description,
-        copyright,
-        creationTime,
-        software,
-        disclaimer,
-        warning,
-        source,
-        comment
-    } = {}) {
-        return png.encode(this.bitmap, {
-            width: this.width,
-            height: this.height,
-            level: compression,
-            channels: 4,
-            text: {
-                Title: title,
-                Author: author,
-                Description: description,
-                Copyright: copyright,
-                'Creation Time': new Date(creationTime === undefined ? Date.now() : creationTime).toUTCString(),
-                Software: software === undefined ? `github.com/matmen/ImageScript v${version}` : software,
-                Disclaimer: disclaimer,
-                Warning: warning,
-                Source: source,
-                Comment: comment
-            }
-        });
+    async encode(compression = 1) {
+        return await png.encode(this.bitmap, { width: this.width, height: this.height, level: compression, channels: 4 });
     }
 
     /**
      * Encodes the image into a JPEG
-     * @param {number} [quality=90] The JPEG quality to use (1-100)
+     * @param {number} [quality=90] The JPEG quality to use
      * @return {Promise<Uint8Array>}
      */
     async encodeJPEG(quality = 90) {
-        return codecs.jpeg.encode_async(this.bitmap, {
-            quality,
-            width: this.width,
-            height: this.height,
-        });
-    }
-
-    /**
-     * Encodes the image into a WEBP
-     * @param {null|number} [quality=null] The WEBP quality to use (0-100) (null is lossless)
-     * @return {Promise<Uint8Array>}
-     */
-    async encodeWEBP(quality = null) {
-        return codecs.webp.encode_async(this.bitmap, {
-            quality,
-            width: this.width,
-            height: this.height,
-        });
+        await jpeglib.init();
+        return jpeglib.encode(this.bitmap, this.width, this.height, Math.max(1, Math.min(100, quality)));
     }
 
     /**
@@ -1211,21 +1109,28 @@ class Image {
     static async decode(data) {
         let image;
 
-        data = mem.view(data);
-        const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+        let view;
+        if (!ArrayBuffer.isView(data)) {
+            data = new Uint8Array(data);
+            view = new DataView(data.buffer);
+        } else {
+            data = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+            view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+        }
 
-        if (ImageType.isPNG(view)) { // PNG
-            const {width, height, pixels} = await png.decode(data);
-            image = new Image(width, height);
+        if (view.getUint32(0, false) === 0x89504e47) { // PNG
+            const { width, height, pixels } = await png.decode(data);
+            image = new this(width, height);
             image.bitmap.set(pixels);
-        } else if (ImageType.isJPEG(view)) { // JPEG
-            const framebuffer = (await jpeglib.init()).decode(data);
+        } else if ((view.getUint32(0, false) >>> 8) === 0xffd8ff) { // JPEG
+            await jpeglib.init();
+            const framebuffer = jpeglib.decode(data);
 
             const width = framebuffer.width;
             const height = framebuffer.height;
             const pixelType = framebuffer.format;
 
-            image = new Image(width, height);
+            image = new this(width, height);
             const buffer = framebuffer.buffer;
 
             if (pixelType === 0) {
@@ -1247,9 +1152,10 @@ class Image {
                     image.bitmap[i + 3] = 0xff;
                 }
             }
-        } else if (ImageType.isTIFF(view)) { // TIFF
-            const framebuffer = (await tifflib.init()).decode(data);
-            image = new Image(framebuffer.width, framebuffer.height);
+        } else if (view.getUint32(0, false) === 0x49492a00) {
+            await tifflib.init();
+            const framebuffer = tifflib.decode(data);
+            image = new this(framebuffer.width, framebuffer.height);
 
             image.bitmap.set(framebuffer.buffer);
         } else throw new Error('Unsupported image type');
@@ -1298,9 +1204,10 @@ class Image {
             throw new RangeError('SVG size must be >= 1')
 
         if (typeof svg === 'string') svg = Buffer.from(svg);
-        const framebuffer = (await svglib.init()).rasterize(svg, mode, size);
 
-        const image = new Image(framebuffer.width, framebuffer.height);
+        await svglib.init();
+        const framebuffer = svglib.rasterize(svg, mode, size);
+        const image = new this(framebuffer.width, framebuffer.height);
 
         image.bitmap.set(framebuffer.buffer);
 
@@ -1358,7 +1265,7 @@ class Image {
 
     }
     /**
-     * Creates a new image containing the rendered text from cache.
+     * Creates a new image containing the rendered text.
      * @param {Font} font Cached Font
      * @param {string} text Text to render
      * @param {number} color Text color to use
@@ -1386,43 +1293,26 @@ class Image {
         layout.free();
         return image.opacity(a / 0xff);
     }
-	/** 
-     * Creates a new image containing the rendered text.
-     * @param {Uint8Array} font TrueType (ttf/ttc) or OpenType (otf) font buffer to use
-     * @param {number} scale Font size to use
-     * @param {string} text Text to render
-     * @param {number} [color=0xffffffff] Text color to use
-     * @param {TextLayout} [layout] The text layout to use
-     * @return {Promise<Image>} The rendered text
-     */
-    static async renderText(font, scale, text, color = 0xffffffff, layout = new TextLayout()) {
-        const { Font, Layout } = await fontlib.init();
-
-        font = new Font(scale, font);
+    static async renderText(font, scale, text, color = 0xffffffff, wrapWidth = Infinity, wrapStyle = this.WRAP_STYLE_WORD) {
+        await fontlib.init();
+        font = new fontlib.Font(scale, font);
         const [r, g, b, a] = Image.colorToRGBA(color);
 
-        const layoutOptions = new Layout();
+        const layout = new fontlib.Layout();
 
-        layoutOptions.reset({
-            max_width: layout.maxWidth,
-            max_height: layout.maxHeight,
-            wrap_style: layout.wrapStyle,
-            vertical_align: layout.verticalAlign,
-            horizontal_align: layout.horizontalAlign,
-            wrap_hard_breaks: layout.wrapHardBreaks
+        layout.reset({
+            wrap_style: wrapStyle ? 'word' : 'letter',
+            max_width: Infinity === wrapWidth ? null : wrapWidth,
         });
 
-        layoutOptions.append(font, text, {scale});
-        const framebuffer = layoutOptions.rasterize(r, g, b);
-        const image = new Image(framebuffer.width, framebuffer.height);
+        layout.append(font, text, scale);
+        const framebuffer = layout.rasterize(r, g, b);
+        const image = new this(framebuffer.width, framebuffer.height);
 
         image.bitmap.set(framebuffer.buffer);
 
-        if (image.height > layout.maxHeight)
-            image.crop(0, 0, image.width, Math.floor(layoutOptions.lines() / image.height * layout.maxHeight) * (image.height / layoutOptions.lines()));
-
         font.free();
-        layoutOptions.free();
+        layout.free();
         return image.opacity(a / 0xff);
     }
 
@@ -1434,59 +1324,18 @@ class Image {
  */
 class Frame extends Image {
     /**
-     * GIF frame disposal mode KEEP. For use with {@link Frame}
-     * @returns {string}
-     */
-    static get DISPOSAL_KEEP() {
-        return 'keep';
-    }
-
-    /**
-     * GIF frame disposal mode PREVIOUS. For use with {@link Frame}
-     * @returns {string}
-     */
-    static get DISPOSAL_PREVIOUS() {
-        return 'previous';
-    }
-
-    /**
-     * GIF frame disposal mode BACKGROUND. For use with {@link Frame}
-     * @returns {string}
-     */
-    static get DISPOSAL_BACKGROUND() {
-        return 'background';
-    }
-
-    static __convert_disposal_mode__(mode) {
-        if (typeof mode === 'string')
-            mode = ['any', 'keep', 'previous', 'background'].indexOf(mode);
-        if (mode < 0 || mode > 3)
-            throw new RangeError('Invalid disposal mode');
-
-        return mode;
-    }
-
-    /**
      * Creates a new, blank frame
      * @param {number} width
      * @param {number} height
      * @param {number} [duration = 100] The frames duration (in ms)
-     * @param {number} [xOffset=0] The frames offset on the x-axis
-     * @param {number} [yOffset=0] The frames offset on the y-axis
-     * @param {string|number} [disposalMode=Frame.DISPOSAL_KEEP] The frame's disposal mode ({@link Frame.DISPOSAL_KEEP}, {@link Frame.DISPOSAL_PREVIOUS} or {@link Frame.DISPOSAL_BACKGROUND})
      * @return {Frame}
      */
-    constructor(width, height, duration = 100, xOffset = 0, yOffset = 0, disposalMode = Frame.DISPOSAL_KEEP) {
+    constructor(width, height, duration = 100) {
         if (isNaN(duration) || duration < 0)
             throw new RangeError('Invalid frame duration');
 
-        disposalMode = Frame.__convert_disposal_mode__(disposalMode);
-
         super(width, height);
         this.duration = duration;
-        this.xOffset = xOffset;
-        this.yOffset = yOffset;
-        this.disposalMode = disposalMode;
     }
 
     toString() {
@@ -1497,33 +1346,15 @@ class Frame extends Image {
      * Converts an Image instance to a Frame, cloning it in the process
      * @param {Image} image The image to create the frame from
      * @param {number} [duration = 100] The frames duration (in ms)
-     * @param {number} [xOffset=0] The frames offset on the x-axis
-     * @param {number} [yOffset=0] The frames offset on the y-axis
-     * @param {string|number} [disposalMode=Frame.DISPOSAL_KEEP] The frames disposal mode ({@link Frame.DISPOSAL_KEEP}, {@link Frame.DISPOSAL_PREVIOUS} or {@link Frame.DISPOSAL_BACKGROUND})
      * @return {Frame}
      */
-    static from(image, duration, xOffset, yOffset, disposalMode = Frame.DISPOSAL_KEEP) {
+    static from(image, duration) {
         if (!(image instanceof Image))
             throw new TypeError('Invalid image passed');
-
-        disposalMode = Frame.__convert_disposal_mode__(disposalMode);
-
-        const frame = new Frame(image.width, image.height, duration, xOffset, yOffset, disposalMode);
+        const frame = new Frame(image.width, image.height, duration);
         frame.bitmap.set(image.bitmap);
 
         return frame;
-    }
-
-    resize(width, height, mode = Image.RESIZE_NEAREST_NEIGHBOR) {
-        const originalWidth = this.width;
-        const originalHeight = this.height;
-
-        const result = super.resize(width, height, mode);
-
-        this.xOffset *= result.width / originalWidth;
-        this.yOffset *= result.height / originalHeight;
-
-        return result;
     }
 }
 
@@ -1541,9 +1372,16 @@ class GIF extends Array {
     constructor(frames, loopCount = -1) {
         super(...frames);
 
-        for (const frame of this)
+        this.width = frames[0].width;
+        this.height = frames[0].height;
+
+        for (const frame of this) {
             if (!(frame instanceof Frame))
                 throw new TypeError(`Frame ${this.indexOf(frame)} is not an instance of Frame`);
+
+            if (frame.width !== this.width) throw new Error('Frames have different widths');
+            if (frame.height !== this.height) throw new Error('Frames have different heights');
+        }
 
         if (loopCount < -1 || isNaN(loopCount))
             throw new RangeError('Invalid loop count');
@@ -1551,46 +1389,8 @@ class GIF extends Array {
         this.loopCount = loopCount;
     }
 
-    /**
-     * The GIFs width
-     * @returns {number}
-     */
-    get width() {
-        let max = 0;
-        for (const frame of this) {
-            let width = frame.width + frame.xOffset;
-            if (max < width)
-                max = width;
-        }
-
-        return max;
-    }
-
-    /**
-     * The GIFs height
-     * @returns {number}
-     */
-    get height() {
-        let max = 0;
-        for (const frame of this) {
-            let height = frame.height + frame.yOffset;
-            if (max < height)
-                max = height;
-        }
-
-        return max;
-    }
-
     toString() {
         return `GIF<${this.width}x${this.height}x${this.duration}ms>`;
-    }
-
-    /**
-     * @returns {Generator<Frame, void, *>}
-     */
-    * [Symbol.iterator]() {
-        for (let i = 0; i < this.length; i++)
-            yield this[i];
     }
 
     /**
@@ -1598,251 +1398,25 @@ class GIF extends Array {
      * @return {number}
      */
     get duration() {
-        return this.reduce((acc, frame) => acc + frame.duration, 0);
+        return [...this].reduce((acc, frame) => acc + frame.duration, 0);
     }
 
     /**
      * Encodes the image into a GIF
-     * @param {number} [quality=95] GIF quality 0-100
+     * @param {number} [quality=10] GIF quality ((best) 1..30 (worst))
      * @return {Promise<Uint8Array>} The encoded data
      */
-    async encode(quality = 95) {
-        const encoder = new codecs.gif.encoder(this.width, this.height);
+    async encode(quality = 10) {
+        await giflib.init();
+        const encoder = new giflib.Encoder(this.width, this.height, this.loopCount);
 
         for (const frame of this) {
             if (!(frame instanceof Frame)) throw new Error('GIF contains invalid frames');
-
-            encoder.add(frame.bitmap, {
-                quality,
-                x: frame.xOffset,
-                y: frame.yOffset,
-                width: frame.width,
-                speed: null, // 1-10
-                height: frame.height,
-                colors: null, // 2-256
-                delay: ~~(frame.duration / 10),
-                dispose: ['any', 'keep', 'previous', 'background'][frame.disposalMode],
-            });
+            encoder.add(~~(frame.duration / 10), frame.width, frame.height, frame.bitmap, quality);
         }
 
-        return encoder.finish({ repeat: -1 === this.loopCount ? null : this.loopCount });
-    }
-
-    /**
-     * Decodes a GIF image
-     * @param {Buffer|Uint8Array} data The binary data to decode
-     * @param {boolean} [onlyExtractFirstFrame=false] Whether to end GIF decoding after the first frame
-     * @return {Promise<GIF>} The decoded GIF
-     */
-    static async decode(data, onlyExtractFirstFrame = false) {
-        let image;
-        data = mem.view(data);
-        const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-
-        if (ImageType.isGIF(view)) { // GIF
-            const frames = [];
-            const decoder = new (await giflib.init()).Decoder(data);
-
-            const gwidth = decoder.width | 0;
-            const gheight = decoder.height | 0;
-            const u32 = new Uint32Array(decoder.width * decoder.height);
-            const u8 = new Uint8Array(u32.buffer, u32.byteOffset, u32.byteLength);
-
-            for (const frame of decoder.frames()) {
-                let offset8 = 0 | 0;
-                let offset32 = 0 | 0;
-                const fx = frame.x | 0;
-                const fy = frame.y | 0;
-                const f8 = frame.buffer;
-                const mode = frame.dispose;
-                const width = frame.width | 0;
-                const height = frame.height | 0;
-                const f32 = new Uint32Array(f8.buffer, f8.byteOffset, width * height);
-                const f = frames[frames.push(new Frame(gwidth, gheight, 10 * frame.delay, 0, 0, 3)) - 1];
-
-                const t8 = f.bitmap;
-                const t32 = new Uint32Array(t8.buffer);
-
-                t8.set(u8);
-
-                if (2 === mode) {
-                    for (let y = 0 | 0; y < height; y++) {
-                        const y_offset = fx + gwidth * (y + fy) | 0;
-
-                        for (let x = 0 | 0; x < width; x++) {
-                            const x_offset = x + y_offset;
-
-                            if (0 === f8[3 + offset8])
-                            t32[x_offset] = u32[x_offset];
-                            else t32[x_offset] = f32[offset32];
-
-                            offset32++;
-                            offset8 += 4;
-                        }
-                    }
-                }
-
-                else if (3 === mode) {
-                    for (let y = 0 | 0; y < height; y++) {
-                        const y_offset = fx + gwidth * (y + fy) | 0;
-
-                        for (let x = 0 | 0; x < width; x++) {
-                            const x_offset = x + y_offset;
-
-                            if (0 === f8[3 + offset8])
-                            t32[x_offset] = u32[x_offset];
-                            else t32[x_offset] = f32[offset32];
-
-                            offset32++;
-                            offset8 += 4;
-                            u32[x_offset] = 0;
-                        }
-                    }
-                }
-
-                else if (0 === mode || 1 === mode) {
-                    t8.set(u8)
-                    for (let y = 0 | 0; y < height; y++) {
-                        const y_offset = fx + gwidth * (y + fy) | 0;
-
-                        for (let x = 0 | 0; x < width; x++) {
-                            const x_offset = x + y_offset;
-
-                            if (0 === f8[3 + offset8])
-                                t32[x_offset] = u32[x_offset];
-                            else t32[x_offset] = f32[offset32];
-
-                            offset32++;
-                            offset8 += 4;
-                            u32[x_offset] = t32[x_offset];
-                        }
-                    }
-                }
-
-                if (onlyExtractFirstFrame)
-                    break;
-            }
-
-            image = new GIF(frames);
-        } else throw new Error('Unsupported image type');
-
-        return image;
-    }
-
-    resize(width, height, mode = Image.RESIZE_NEAREST_NEIGHBOR) {
-        for (const frame of this)
-            frame.resize(width, height, mode);
+        return encoder.u8();
     }
 }
 
-class TextLayout {
-    /**
-     * Layout options for {@link Image.renderText}
-     * @param {object} [options]
-     * @param {number} [options.maxWidth=Infinity] The texts max width
-     * @param {number} [options.maxHeight=Infinity] The texts max height
-     * @param {string} [options.wrapStyle='word'] The texts wrap style when reaching the max width (word, char)
-     * @param {string} [options.verticalAlign='left'] The vertical align mode (left, center, right)
-     * @param {string} [options.horizontalAlign='top'] The horizontal align mode (top, middle, bottom)
-     * @param {boolean} [options.wrapHardBreaks=true] Whether to force wrap at new line characters
-     */
-    constructor(options) {
-        const {maxWidth, maxHeight, wrapStyle, verticalAlign, horizontalAlign, wrapHardBreaks} = options || {};
-
-        this.maxWidth = maxWidth || Infinity;
-        if (isNaN(this.maxWidth) || this.maxWidth < 1)
-            throw new RangeError('Invalid maxWidth');
-
-        this.maxHeight = maxHeight || Infinity;
-        if (isNaN(this.maxHeight) || this.maxHeight < 1)
-            throw new RangeError('Invalid maxHeight');
-
-        this.wrapStyle = wrapStyle || 'word';
-        if (!['word', 'char'].includes(this.wrapStyle))
-            throw new RangeError('Invalid wrapStyle');
-
-        this.verticalAlign = verticalAlign || 'left';
-        if (!['left', 'center', 'right'].includes(this.verticalAlign))
-            throw new RangeError('Invalid verticalAlign');
-
-        this.horizontalAlign = horizontalAlign || 'top';
-        if (!['top', 'middle', 'bottom'].includes(this.horizontalAlign))
-            throw new RangeError('Invalid horizontalAlign');
-
-        this.wrapHardBreaks = wrapHardBreaks || true;
-        if (typeof this.wrapHardBreaks !== 'boolean')
-            throw new TypeError('Invalid wrapHardBreaks');
-    }
-}
-
-class ImageType {
-    /**
-     * Gets an images type (png, jpeg, tiff, gif)
-     * @param {Buffer|Uint8Array} data The image binary to get the type of
-     * @returns {string|null} The image type (png, jpeg, tiff, gif, null)
-     */
-    static getType(data) {
-        let view;
-        if (!ArrayBuffer.isView(data)) {
-            data = new Uint8Array(data);
-            view = new DataView(data.buffer);
-        } else {
-            data = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-            view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-        }
-
-        if (this.isPNG(view)) return 'png';
-        if (this.isJPEG(view)) return 'jpeg';
-        if (this.isTIFF(view)) return 'tiff';
-        if (this.isGIF(view)) return 'gif';
-        return null;
-    }
-
-    /**
-     * @param {DataView} view
-     * @returns {boolean}
-     */
-    static isPNG(view) {
-        return view.getUint32(0, false) === MAGIC_NUMBERS.PNG;
-    }
-
-    /**
-     * @param {DataView} view
-     * @returns {boolean}
-     */
-    static isJPEG(view) {
-        return (view.getUint32(0, false) >>> 8) === MAGIC_NUMBERS.JPEG;
-    }
-
-    /**
-     * @param {DataView} view
-     * @returns {boolean}
-     */
-    static isTIFF(view) {
-        return view.getUint32(0, false) === MAGIC_NUMBERS.TIFF;
-    }
-
-    /**
-     * @param {DataView} view
-     * @returns {boolean}
-     */
-    static isGIF(view) {
-        return (view.getUint32(0, false) >>> 8) === MAGIC_NUMBERS.GIF;
-    }
-}
-
-/**
- * Decodes the given image binary
- * @param {Uint8Array|Buffer} data The image data
- * @param {boolean} [onlyExtractFirstFrame] Whether to end GIF decoding after the first frame
- * @returns {Promise<GIF|Image>} The decoded image
- */
-function decode(data, onlyExtractFirstFrame) {
-    const type = ImageType.getType(data);
-
-    if (type === 'gif')
-        return GIF.decode(data, onlyExtractFirstFrame);
-    return Image.decode(data);
-}
-
-module.exports = {Image, GIF, Frame, TextLayout, ImageType, decode};
+module.exports = { Image, GIF, Frame };
