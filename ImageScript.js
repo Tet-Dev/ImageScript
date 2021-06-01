@@ -1340,6 +1340,8 @@ class Image {
     }
     static async cacheFontAtScales(scales, font) {
         const { Font, Layout } = await fontlib.init();
+		fontlib.Layout = Layout;
+		fontlib.Font = Font;
         const fonts = {};
         for (let scale in scales){
             scale = scales[scale];
@@ -1351,8 +1353,7 @@ class Image {
 			
             console.log(`Rendered font in ${Date.now() - startTime}ms!`);
         }
-		fontlib.Layout = Layout;
-		fontlib.Font = Font;
+		
         return fonts;
 
     }
@@ -1368,7 +1369,7 @@ class Image {
     static async renderTextFromCache(cachedFont, text, color = 0xffffffff, wrapWidth = Infinity, wrapStyle = this.WRAP_STYLE_WORD) {
         let font = cachedFont.font;
         const [r, g, b, a] = Image.colorToRGBA(color);
-		
+		console.log(fontlib.Layout);
         const layout = new fontlib.Layout();
 
         layout.reset({
