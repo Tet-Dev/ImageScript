@@ -1238,29 +1238,25 @@ class Image {
      * @return {Promise<Font>} The rendered text
      */
     static async cacheFont(scale, font) {
-		const { Font, Layout } = await fontlib.init();
+        await fontlib.init();
         return {
-            font: new Font(scale, font),
+            font: new fontlib.Font(scale, font),
             scale: scale,
         };
 
     }
     static async cacheFontAtScales(scales, font) {
-        const { Font, Layout } = await fontlib.init();
-		fontlib.Layout = Layout;
-		fontlib.Font = Font;
+        await fontlib.init();
         const fonts = {};
         for (let scale in scales){
             scale = scales[scale];
             const startTime = Date.now();
             fonts[scale] = {
-                font: new Font(scale, font),
+                font: new fontlib.Font(scale, font),
                 scale: scale,
             }
-			
             console.log(`Rendered font in ${Date.now() - startTime}ms!`);
         }
-		
         return fonts;
 
     }
@@ -1276,7 +1272,7 @@ class Image {
     static async renderTextFromCache(cachedFont, text, color = 0xffffffff, wrapWidth = Infinity, wrapStyle = this.WRAP_STYLE_WORD) {
         let font = cachedFont.font;
         const [r, g, b, a] = Image.colorToRGBA(color);
-		console.log(fontlib.Layout);
+
         const layout = new fontlib.Layout();
 
         layout.reset({
